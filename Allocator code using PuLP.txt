@@ -1,0 +1,154 @@
+"""
+This model optimizes distribution of shoe inventory to retail outlets,
+(approx 5500 SKUs for 28 outlets),
+using the PuLP linear programming library in Python.
+SolverStudio is used to apply it to excel.
+
+This is a 2-step process.
+
+The 1st step satisfies minimum product requirements for each store (based on HQ's seasonal plan called the Model OTB)
+It allocates new product launches, and replenishments for required SKUs.
+
+The 2nd step optimizes for sales.
+It allocates SKUs according to each store's projected ability to sell the specific style,
+while balancing constraints such as stock availability, store capacity, and product-lifecylce stage (based on the Model OTB).
+
+SolverStudio is used to define ranges, and print the output in excel.
+
+This is based on the the Beer Distribution Problem for the PuLP Modeller 
+by Antony Phillips, Dr Stuart Mitchell  2007
+SolverStudio version: Andrew Mason
+
+"""
+# Import PuLP modeller functions
+from pulp import *
+
+# Creates the 'prob' variable to contain the problem data
+prob = LpProblem("Allocation Problem",LpMaximize)
+
+# Creates a list of tuples containing all the possible routes for transport
+Solutions = [(p,s) for p in Products for s in Stores]
+
+# A dictionary called 'Vars' is created to contain the referenced variables (the routes)
+vars = LpVariable.dicts("Route",(Products,Stores),0,None,LpInteger)
+
+for (p,s) in Solutions:
+    vars[p][s].bounds(0,ModelOTB[p,s]>0)
+
+
+# The objective function is added to 'prob' first
+prob += lpSum([vars[p][s]*Profit[p,s] for (p,s) in Solutions]), "Sum_of_Transporting_Costs"
+
+# The supply maximum constraints are added to prob for each supply node (product)
+for p in Products:
+    prob += lpSum([vars[p][s] for s in Stores])<=Supply[p], "Sum_of_Products_out_of_Warehouse_%s"%p
+
+# The demand maximum constraints are added to prob for each demand node (stores)
+for s in Stores:
+    prob += lpSum([vars[p][s] for p in Products])<=Demand[s], "Sum_of_Products_into_Store%s"%s
+
+
+# The problem data is written to an .lp file
+prob.writeLP("AllocationProblem.lp")
+
+# The problem is solved using PuLP's choice of Solver
+prob.solve()
+
+# The status of the solution is printed to the screen
+print "Status:", LpStatus[prob.status]
+
+# Each of the variables is printed with it's resolved optimum value
+#for v in prob.variables():
+#    print v.name, "=", v.varValue
+
+# The optimised objective function value is printed to the screen    
+print "Total Value of Allocation = ", value(prob.objective)
+
+for (p,s) in Solutions:
+  Flow[p,s]=vars[p][s].varValue
+
+SolverResult = LpStatus[prob.status]
+
+TotalValue = value(prob.objective)
+
+#PART TWO SET UP >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+for p in Products:
+    PAlloc[p]= pulp.value(lpSum([vars[p][s] for s in Stores]))
+
+for p in Products:
+    Supply2[p]= Supply[p]-PAlloc[p]
+
+for s in Stores:
+    SAlloc[s]= pulp.value(lpSum([vars[p][s]for p in Products]))
+
+for s in Stores:
+    Demand2[s]=Demand[s]-SAlloc[s]
+#>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+
+
+# Creates the 'prob' variable to contain the problem data
+prob2 = LpProblem("Allocation Problem2",LpMaximize)
+
+# Creates a list of tuples containing all the possible routes for transport
+Solutions2 = [(p,s) for p in Products for s in Stores]
+
+# A dictionary called 'Vars' is created to contain the referenced variables (the routes)
+vars2 = LpVariable.dicts("Route2",(Products,Stores),0,None,LpInteger)
+
+for (p,s) in Solutions2:
+    vars2[p][s].bounds(0,ModelOTB [p,s]-Flow[p,s])
+ 
+
+# The objective function is added to 'prob' first
+prob2 += lpSum([vars2[p][s]*Profit[p,s] for (p,s) in Solutions2]), "Sum_of_Transporting_Costs"
+
+    
+# The supply maximum constraints are added to prob for each supply node (product)
+for p in Products:
+    prob2 += lpSum([vars2[p][s] for s in Stores])<=Supply2[p], "Sum_of_Products_out_of_Warehouse_%s"%p
+
+# The demand maximum constraints are added to prob for each demand node (stores)
+for s in Stores:
+    prob2 += lpSum([vars2[p][s] for p in Products])<=Demand2[s], "Sum_of_Products_into_Store%s"%s
+
+
+# The problem data is written to an .lp file
+prob.writeLP("AllocationProblem2.lp")
+
+# The problem is solved using PuLP's choice of Solver
+prob2.solve()
+
+# The status of the solution is printed to the screen
+print "Status2:", LpStatus[prob2.status]
+
+
+# The optimised objective function value is printed to the screen    
+print "Total Value of Allocation2 = ", value(prob2.objective)
+
+for (p,s) in Solutions2:
+ Flow2[p,s]=vars2[p][s].varValue
+
+SolverResult2 = LpStatus[prob2.status]
+
+#WRAP UP >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+for p in Products:
+    PAlloc2[p]= pulp.value(lpSum([vars2[p][s] for s in Stores]))
+
+for p in Products:
+    PAllocTotal[p]= PAlloc[p]+PAlloc2[p]
+    
+for p in Products:
+    PFreeTransfer[p]=PAllocTotal[p]-PBulk[p]
+
+for p in Products:
+    if PFreeTransfer[p]>0: PFreeTransferStatus[p]=1   
+    
+for s in Stores:
+    SAlloc2[s]= pulp.value(lpSum([vars2[p][s]for p in Products]))
+
+for s in Stores:
+    SAllocTotal[s]=SAlloc[s]+SAlloc2[s]
+    
+for (p,s) in Solutions:
+    FlowTotal[p,s]=Flow[p,s]+Flow2[p,s]
